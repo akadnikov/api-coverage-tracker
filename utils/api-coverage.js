@@ -299,6 +299,13 @@ export class ApiCoverage {
           try {
             const { pathname, queryParams } = this.#parseUrlAndParams(url)
 
+            // Merge query params from Playwright options.params (passed separately from URL)
+            if (options?.params) {
+              for (const [key, value] of Object.entries(options.params)) {
+                queryParams[key] = String(value)
+              }
+            }
+
             this.log('info', `[INFO] Tracking request: ${method.toUpperCase()} ${pathname}`)
             await this.#markEndpointCovered(method.toUpperCase(), pathname, response.status(), queryParams)
           } catch (error) {
@@ -1141,6 +1148,11 @@ S   */
   }
 
   async #writeReport(report) {
+    const lockFilePath = `${this.JSON_REPORT_PATH}.lock`
+    if (!(await this.#acquireLock(lockFilePath))) {
+      this.log('error', '[ERROR]: Failed to acquire lock for JSON report file')
+      throw new Error('Failed to acquire lock for JSON report file')
+    }
     try {
       let existingReport = {}
       if (fs.existsSync(this.JSON_REPORT_PATH)) {
@@ -1179,9 +1191,11 @@ S   */
       }
       this.log('info', `merged report: ${mergedReport}`)
       await this.#mergeStats(mergedReport)
-      return await this.#safeWriteFile(this.JSON_REPORT_PATH, JSON.stringify(mergedReport, null, 2))
+      await this.#safeWriteFile(this.JSON_REPORT_PATH, JSON.stringify(mergedReport, null, 2))
     } catch (err) {
       throw new Error(`Failed to merge and write report: ${err.message}`)
+    } finally {
+      await this.#releaseLock(lockFilePath)
     }
   }
 
@@ -1210,6 +1224,11 @@ S   */
   }
 
   async #generateHtmlReport() {
+    const lockFilePath = `${this.REPORT_PATH}.lock`
+    if (!(await this.#acquireLock(lockFilePath))) {
+      this.log('error', '[ERROR]: Failed to acquire lock for HTML report file')
+      throw new Error('Failed to acquire lock for HTML report file')
+    }
     try {
       if (!fs.existsSync(this.REPORT_PATH)) await fs.promises.cp(this.TEMPLATE_PATH, this.REPORT_PATH, { recursive: true })
       const report = await fs.promises.readFile(this.JSON_REPORT_PATH, 'utf-8')
@@ -1219,9 +1238,11 @@ S   */
         `<script id="state" type="application/json">${report}</script>`
       )
       // await fs.promises.unlink(this.JSON_REPORT_HISTORY_PATH)
-      return this.#safeWriteFile(this.REPORT_PATH, html)
+      await this.#safeWriteFile(this.REPORT_PATH, html)
     } catch (err) {
       throw new Error('ERROR copying template HTML file ' + err.message)
+    } finally {
+      await this.#releaseLock(lockFilePath)
     }
   }
 
